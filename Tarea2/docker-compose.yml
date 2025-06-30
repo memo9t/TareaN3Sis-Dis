@@ -1,0 +1,89 @@
+services:
+  mongo:
+    image: mongo:5.0
+    container_name: mongo_waze
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.2
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.6.2
+    container_name: kibana
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+
+  scraper:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    container_name: waze_scraper
+    depends_on:
+      - elasticsearch
+      - mongo
+    environment:
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - META=10000
+      - DELAY=5
+    restart: unless-stopped
+
+  filtering:
+    build:
+      context: .
+      dockerfile: filtering/Dockerfile
+    container_name: waze_filter
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+    volumes:
+      - ./data:/data
+    command: ["python", "filter.py"]
+    restart: "no"
+
+  pig_processing:
+    build:
+      context: .
+      dockerfile: pig_processing/Dockerfile
+    container_name: hadoop_pig
+    depends_on:
+      - filtering
+      - mongo
+    volumes:
+      - ./data:/data
+    ports:
+      - "9000:9000"
+      - "50070:50070"
+      - "9870:9870"
+      - "8088:8088"
+      - "22:22" 
+    environment:
+      - HDFS_NAMENODE_USER=root
+      - HDFS_DATANODE_USER=root
+      - YARN_RESOURCEMANAGER_USER=root
+      - YARN_NODEMANAGER_USER=root
+    restart: "no"
+
+volumes:
+  mongo_data:
+  es_data:
